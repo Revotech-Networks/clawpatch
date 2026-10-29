@@ -2436,59 +2436,72 @@ describe("workflow", () => {
     delete process.env["CLAWPATCH_PROVIDER"];
   });
 
-  it("records already-dirty files changed during fix validation", async () => {
-    const root = await fixtureRoot("clawpatch-fix-dirty-snapshot-");
-    await initGit(root);
-    const config = defaultConfig();
-    await writeFixture(
-      root,
-      "clawpatch.config.json",
-      JSON.stringify(
-        {
-          ...config,
-          provider: { name: "mock", model: null },
-          commands: {
-            ...config.commands,
-            format:
-              "node -e \"require('node:fs').appendFileSync('src/index.ts','// validation touch\\n')\"",
+  it.each([
+    { projectDir: ".", alreadyDirty: true },
+    { projectDir: "packages/app", alreadyDirty: true },
+    { projectDir: "packages/app", alreadyDirty: false },
+  ])(
+    "records fix files and previews PRs for $projectDir (already dirty: $alreadyDirty)",
+    async ({ projectDir, alreadyDirty }) => {
+      const gitRoot = await fixtureRoot("clawpatch-fix-dirty-snapshot-");
+      const root = join(gitRoot, projectDir);
+      await initGit(gitRoot);
+      const config = defaultConfig();
+      await writeFixture(
+        root,
+        "clawpatch.config.json",
+        JSON.stringify(
+          {
+            ...config,
+            provider: { name: "mock", model: null },
+            commands: {
+              ...config.commands,
+              format:
+                "node -e \"require('node:fs').appendFileSync('src/index.ts','// validation touch\\n')\"",
+            },
+            git: { ...config.git, requireCleanWorktreeForFix: !alreadyDirty },
           },
-          git: { ...config.git, requireCleanWorktreeForFix: false },
-        },
-        null,
-        2,
-      ),
-    );
-    await writeFixture(
-      root,
-      "package.json",
-      JSON.stringify({
-        name: "buggy",
-        bin: { buggy: "src/index.ts" },
-        scripts: {},
-      }),
-    );
-    await writeFixture(root, "src/index.ts", "export const value = 'TODO_BUG';\n");
-    await checkCommand(root, "git add clawpatch.config.json package.json src/index.ts");
-    await checkCommand(root, 'git -c commit.gpgsign=false commit -q -m "base"');
-    await writeFixture(
-      root,
-      "src/index.ts",
-      "export const value = 'TODO_BUG';\n// pre-existing user change\n",
-    );
-    const context = await makeContext(testOptions(root));
+          null,
+          2,
+        ),
+      );
+      await writeFixture(
+        root,
+        "package.json",
+        JSON.stringify({
+          name: "buggy",
+          bin: { buggy: "src/index.ts" },
+          scripts: {},
+        }),
+      );
+      await writeFixture(root, "src/index.ts", "export const value = 'TODO_BUG';\n");
+      await checkCommand(root, "git add clawpatch.config.json package.json src/index.ts");
+      await checkCommand(root, 'git -c commit.gpgsign=false commit -q -m "base"');
+      if (alreadyDirty) {
+        await writeFixture(
+          root,
+          "src/index.ts",
+          "export const value = 'TODO_BUG';\n// pre-existing user change\n",
+        );
+      }
+      const context = await makeContext(testOptions(root));
 
-    await initCommand(context, {});
-    await mapCommand(context);
-    const reviewed = (await reviewCommand(context, { limit: "1" })) as {
-      next: string;
-    };
-    const finding = reviewed.next.split(" ").at(-1) ?? "";
-    const fixed = await fixCommand(context, { finding });
-    const patches = await readPatchAttempts(statePaths(join(root, ".clawpatch")));
+      await initCommand(context, {});
+      await mapCommand(context);
+      const reviewed = (await reviewCommand(context, { limit: "1" })) as {
+        next: string;
+      };
+      const finding = reviewed.next.split(" ").at(-1) ?? "";
+      const fixed = await fixCommand(context, { finding });
+      const patches = await readPatchAttempts(statePaths(join(root, ".clawpatch")));
 
-    expect(fixed).toMatchObject({ status: "applied", filesChanged: 1 });
-    expect(patches[0]?.filesChanged).toEqual(["src/index.ts"]);
-  });
+      expect(fixed).toMatchObject({ status: "applied", filesChanged: 1 });
+      expect(patches[0]?.filesChanged).toEqual(["src/index.ts"]);
+      await expect(
+        openPrCommand(context, { patch: patches[0]!.patchAttemptId, dryRun: true }),
+      ).resolves.toMatchObject({ dryRun: true, patchAttempt: patches[0]!.patchAttemptId });
+    },
+  );
 
   it("records dirty files removed during fix validation", async () => {
     const root = await fixtureRoot("clawpatch-fix-dirty-delete-");
