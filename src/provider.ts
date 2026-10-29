@@ -1899,7 +1899,11 @@ function parseAcpxJsonOutput<T>(stdout: string, parseOutput: (output: unknown) =
 function acpxJsonCandidates(
   stdout: string,
   retrySafe: boolean,
-): { candidates: string[]; observedKinds: Set<string>; terminalStopReason: string | undefined } {
+): {
+  candidates: Iterable<string>;
+  observedKinds: Set<string>;
+  terminalStopReason: string | undefined;
+} {
   const toolCandidates: string[] = [];
   const messageChunks: string[] = [];
   const thoughtChunks: string[] = [];
@@ -1967,22 +1971,24 @@ function acpxJsonCandidates(
       toolCandidates.push(update.output);
     }
   }
-  const candidates = retrySafe
-    ? [
-        ...chunkSuffixCandidates(messageChunks),
-        ...toolCandidates.toReversed(),
-        ...chunkSuffixCandidates(thoughtChunks),
-      ]
-    : [
-        ...(messageChunks.length > 0 ? [messageChunks.join("")] : []),
-        ...toolCandidates.toReversed(),
-        ...(thoughtChunks.length > 0 ? [thoughtChunks.join("")] : []),
-      ];
-  return { candidates, observedKinds, terminalStopReason };
+  function* candidates(): Iterable<string> {
+    if (retrySafe) {
+      yield* chunkSuffixCandidates(messageChunks);
+    } else if (messageChunks.length > 0) {
+      yield messageChunks.join("");
+    }
+    yield* toolCandidates.toReversed();
+    if (retrySafe) {
+      yield* chunkSuffixCandidates(thoughtChunks);
+    } else if (thoughtChunks.length > 0) {
+      yield thoughtChunks.join("");
+    }
+  }
+  return { candidates: candidates(), observedKinds, terminalStopReason };
 }
 
 function parseAcpxJsonCandidates<T>(
-  candidates: string[],
+  candidates: Iterable<string>,
   observedKinds: Set<string>,
   terminalStopReason: string | undefined,
   parseOutput: (output: unknown) => T,
@@ -1998,7 +2004,23 @@ function parseAcpxJsonCandidates<T>(
     );
   }
 
-  if (candidates.length === 0) {
+  let lastErr: unknown;
+  let foundCandidate = false;
+  for (const candidate of candidates) {
+    foundCandidate = true;
+    const text = candidate.trim();
+    try {
+      const parsed = extractJson(text);
+      if (parsed !== null) {
+        return parseOutput(parsed);
+      }
+      throw new Error("no JSON object found");
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  if (!foundCandidate) {
     const stopReasonNote =
       terminalStopReason === "end_turn"
         ? `acpx reported stopReason=end_turn but emitted no message chunks. ` +
@@ -2014,19 +2036,6 @@ function parseAcpxJsonCandidates<T>(
     );
   }
 
-  let lastErr: unknown;
-  for (const candidate of candidates) {
-    const text = candidate.trim();
-    try {
-      const parsed = extractJson(text);
-      if (parsed !== null) {
-        return parseOutput(parsed);
-      }
-      throw new Error("no JSON object found");
-    } catch (err) {
-      lastErr = err;
-    }
-  }
   throw new ClawpatchError(
     `acpx provider produced unparseable JSON: ${(lastErr as Error).message}. ` +
       `Observed envelope kinds: [${[...observedKinds].join(", ")}]. ` +
@@ -2037,19 +2046,19 @@ function parseAcpxJsonCandidates<T>(
   );
 }
 
-function chunkSuffixCandidates(chunks: string[]): string[] {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-  let suffix = "";
+function* chunkSuffixCandidates(chunks: string[]): Iterable<string> {
+  const text = chunks.join("");
+  let start = text.length;
+  let previousLength = 0;
   for (let index = chunks.length - 1; index >= 0; index -= 1) {
-    suffix = `${chunks[index] ?? ""}${suffix}`;
-    const candidate = suffix.trim();
-    if (candidate.length > 0 && !seen.has(candidate)) {
-      candidates.push(candidate);
-      seen.add(candidate);
+    start -= chunks[index]?.length ?? 0;
+    const candidate = text.slice(start).trim();
+    // Prepending chunks can only grow a trimmed suffix or repeat it with whitespace.
+    if (candidate.length > previousLength) {
+      previousLength = candidate.length;
+      yield candidate;
     }
   }
-  return candidates;
 }
 
 async function runGrokJson(
