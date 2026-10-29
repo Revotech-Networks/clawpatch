@@ -1282,6 +1282,41 @@ describe("extractAcpxJson", () => {
     });
   });
 
+  it("parses a final answer after a long thought stream", () => {
+    const result = { findings: [], inspected: { files: [], symbols: [], notes: [] } };
+    const stdout = [
+      ...Array.from({ length: 8_000 }, () => textChunk("agent_thought_chunk", "thinking safely ")),
+      textChunk("agent_message_chunk", JSON.stringify(result)),
+      terminalEnvelope("end_turn"),
+    ].join("\n");
+
+    expect(parseAcpxJsonOutput(stdout, (output) => reviewOutputSchema.parse(output))).toEqual(
+      result,
+    );
+  });
+
+  it("skips repeated whitespace suffixes before falling back from messages to tools", () => {
+    const stdout = [
+      textChunk("agent_message_chunk", "  "),
+      textChunk("agent_message_chunk", '{"attempt":"message"}'),
+      textChunk("agent_message_chunk", "\n"),
+      updateEnvelope({ sessionUpdate: "tool_call_result", output: '{"attempt":"tool"}' }),
+      textChunk("agent_thought_chunk", '{"attempt":"thought"}'),
+    ].join("\n");
+    const attempts: unknown[] = [];
+
+    expect(
+      parseAcpxJsonOutput(stdout, (output) => {
+        attempts.push(output);
+        if ((output as { attempt: string }).attempt === "message") {
+          throw new Error("rejected message schema");
+        }
+        return output;
+      }),
+    ).toEqual({ attempt: "tool" });
+    expect(attempts).toEqual([{ attempt: "message" }, { attempt: "tool" }]);
+  });
+
   it("throws malformed-output with observed envelope kinds when nothing is extractable", () => {
     const stdout = updateEnvelope({
       sessionUpdate: "usage_update",
