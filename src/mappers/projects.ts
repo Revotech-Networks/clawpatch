@@ -3,9 +3,18 @@ import { basename, dirname, join } from "node:path";
 import { packageScripts, readPackageJson } from "../detect.js";
 import { pathExists } from "../fs.js";
 import { shellQuotePath } from "../shell.js";
-import { isSafeDirectory, normalize, pathMatchesPrefix, shouldSkip } from "./shared.js";
+import {
+  detectNodePackageManager,
+  isSafeDirectory,
+  nodeScriptCommand as scriptCommand,
+  normalize,
+  pathMatchesPrefix,
+  shouldSkip,
+} from "./shared.js";
 import { taskGraphCommand, type WorkspaceTaskGraph } from "./task-graph.js";
 import type { SeedFileRef } from "./types.js";
+
+export { nodeScriptCommand as scriptCommand } from "./shared.js";
 
 export type NodePackageJson = {
   name?: unknown;
@@ -192,29 +201,6 @@ export function projectTargetCommand(
 
 export function packageRelativePath(packageRoot: string, path: string): string {
   return packageRoot === "." ? normalize(path) : normalize(join(packageRoot, path));
-}
-
-export function scriptCommand(packageManager: string, packageRoot: string, script: string): string {
-  const quotedScript = shellQuotePath(script);
-  if (packageRoot === ".") {
-    if (packageManager === "bun") {
-      return `bun run ${quotedScript}`;
-    }
-    return packageManager === "npm"
-      ? `npm run ${quotedScript}`
-      : `${packageManager} ${quotedScript}`;
-  }
-  const quotedRoot = shellQuotePath(packageRoot);
-  if (packageManager === "pnpm") {
-    return `pnpm --dir ${quotedRoot} ${quotedScript}`;
-  }
-  if (packageManager === "yarn") {
-    return `yarn --cwd ${quotedRoot} ${quotedScript}`;
-  }
-  if (packageManager === "bun") {
-    return `bun --cwd ${quotedRoot} run ${quotedScript}`;
-  }
-  return `npm --prefix ${quotedRoot} run ${quotedScript}`;
 }
 
 export function projectDisplayName(info: NodeProjectInfo): string {
@@ -981,22 +967,6 @@ function packageDisplayName(
     return packageJson.name;
   }
   return packageRoot === "." ? basename(dirname(join(packageJsonPath))) : basename(packageRoot);
-}
-
-async function detectNodePackageManager(root: string): Promise<string> {
-  if (
-    (await pathExists(join(root, "pnpm-lock.yaml"))) ||
-    (await pathExists(join(root, "pnpm-workspace.yaml")))
-  ) {
-    return "pnpm";
-  }
-  if (await pathExists(join(root, "yarn.lock"))) {
-    return "yarn";
-  }
-  if ((await pathExists(join(root, "bun.lock"))) || (await pathExists(join(root, "bun.lockb")))) {
-    return "bun";
-  }
-  return "npm";
 }
 
 function nxCommand(packageManager: string, target: string, projectName: string): string {
