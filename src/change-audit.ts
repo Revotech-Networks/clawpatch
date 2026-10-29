@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, readdir, readlink } from "node:fs/promises";
+import { lstat, readdir, readlink, realpath } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { runCommand } from "./exec.js";
 
@@ -38,11 +38,20 @@ async function sourceChangedPaths(root: string, stateDir: string): Promise<Set<s
   if (result.exitCode !== 0) {
     return null;
   }
+  const gitRoot = await runCommand("git rev-parse --show-toplevel", root);
+  if (gitRoot.exitCode !== 0 || gitRoot.stdout.trim().length === 0) {
+    return null;
+  }
+  const [resolvedRoot, resolvedGitRoot] = await Promise.all([
+    realpath(root).catch(() => root),
+    realpath(gitRoot.stdout.trim()).catch(() => gitRoot.stdout.trim()),
+  ]);
   const relativeStateDir = normalizePath(relative(root, stateDir));
   return new Set(
-    parsePorcelainPaths(result.stdout).filter(
-      (path) => path.length > 0 && !isStatePath(path, relativeStateDir),
-    ),
+    parsePorcelainPaths(result.stdout)
+      // Porcelain paths are repository-relative; keep ../ paths for the dirty guard.
+      .map((path) => normalizePath(relative(resolvedRoot, resolve(resolvedGitRoot, path))))
+      .filter((path) => path.length > 0 && !isStatePath(path, relativeStateDir)),
   );
 }
 
