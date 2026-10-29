@@ -315,12 +315,9 @@ async function gradleProjectSeeds(root: string, gradleRoot: string): Promise<Fea
       continue;
     }
     const sourceRoot = moduleRoot === "." ? "src" : `${moduleRoot}/src`;
-    const sourceFiles = (await walk(root, [sourceRoot]))
-      .filter(isGradleSourceFile)
-      .filter((file) => !isGradleTestFile(moduleRoot, file));
-    const testFiles = (await walk(root, [sourceRoot]))
-      .filter(isGradleSourceFile)
-      .filter((file) => isGradleTestFile(moduleRoot, file));
+    const moduleFiles = (await walk(root, [sourceRoot])).filter(isGradleSourceFile);
+    const sourceFiles = moduleFiles.filter((file) => !isGradleTestFile(moduleRoot, file));
+    const testFiles = moduleFiles.filter((file) => isGradleTestFile(moduleRoot, file));
     const tags = await gradleTags(root, gradleRoot, buildFile, sourceFiles);
 
     seeds.push({
