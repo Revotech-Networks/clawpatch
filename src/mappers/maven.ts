@@ -45,12 +45,9 @@ async function mavenProjectSeeds(
     }
     mappedModuleRoots.add(moduleRoot);
     const sourceRoot = moduleRoot === "." ? "src" : `${moduleRoot}/src`;
-    const sourceFiles = (await walk(root, [sourceRoot]))
-      .filter(isMavenSourceFile)
-      .filter((file) => !isMavenTestFile(moduleRoot, file));
-    const testFiles = (await walk(root, [sourceRoot]))
-      .filter(isMavenSourceFile)
-      .filter((file) => isMavenTestFile(moduleRoot, file));
+    const moduleFiles = (await walk(root, [sourceRoot])).filter(isMavenSourceFile);
+    const sourceFiles = moduleFiles.filter((file) => !isMavenTestFile(moduleRoot, file));
+    const testFiles = moduleFiles.filter((file) => isMavenTestFile(moduleRoot, file));
     const tags = mavenTags(info, sourceFiles);
     const contextFiles = await mavenContextFiles(root, moduleRoot);
 
