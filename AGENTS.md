@@ -53,3 +53,11 @@ rendered-doc changes.
 Do not commit `.clawpatch/` state, credentials, provider transcripts with
 secrets, or generated `dist/` edits. Provider output is schema-validated; keep
 new provider or mapper code conservative about reading secret-bearing files.
+
+<!-- fork:start -->
+
+This is `Revotech-Networks/clawpatch`, Revotech's fork of `openclaw/clawpatch`.
+It is retired and archived (read-only) and nothing depends on it; use upstream instead.
+Read `FORK.md` before working here: it lists our six commits and their upstream status.
+
+<!-- fork:end -->
